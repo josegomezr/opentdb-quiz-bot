@@ -7,6 +7,7 @@ A telegram quiz bot fed with opentdb.com data.
 - `python-venv` or [pipenv](https://pipenv.kennethreitz.org/en/latest/)
 - [requests](https://requests.readthedocs.io/en/master/)
 - [python-telegram-bot](https://python-telegram-bot.readthedocs.io/en/stable/)
+- Your bot will needs privacy mode to be disabled. Go to: BotFather > /mybots > &lt;select your bot&gt; > Bot Settings > Group Privacy
 
 ## Running
 1. Clone the repo & cd into it.
