@@ -17,6 +17,9 @@ from telegram.error import NetworkError, Unauthorized
 
 
 class GameState(object):
+    def __repr__(self):
+        return '<GameState {}>'.format(' '.join(['{}={}'.format(k, repr(v)) for k,v in self.__dict__.items()]))
+
     def __init__(self, in_game=False, question="question", question_type='multiple', answer="CORRECT", chat_id=-1
         ):
         self.in_game = in_game
@@ -26,11 +29,24 @@ class GameState(object):
         self.chat_id = chat_id
         self.reply_count = 0
         self.reply_max = 4
-        self.random = random.Random(chat_id)
         self._clue = ' '.join(map(lambda x: '_'*len(x), self.answer.split(' ')))
 
     def tick(self):
         self.reply_count += 1
+
+        t = sum(map(lambda x: len(x), self.answer.split(' ')))
+
+        if self.reply_count == 0:
+            return ' '.join(list(self._clue))
+
+        rendered = list(self._clue)
+        clues = math.floor((float(t)/(self.reply_max+1)) * self.reply_count)
+        while clues > 0:
+            i = random.randint(0, t-1)
+            rendered[i] = self.answer[i]
+            clues -= 1
+        self._clue = ''.join(rendered)
+
         return self
 
     @property
@@ -51,31 +67,21 @@ class GameState(object):
             regex += "|" + alternative
 
         regex = regex.format(re.escape(self.sanitize(self.answer)))
-        saned_answer = self.sanitize(prompted_answer)
+        saned_prompt = self.sanitize(prompted_answer)
 
-        print(regex, saned_answer)
-        return bool(re.search(regex, saned_answer, re.I))
+        logging.info("[%s] valid_answer: answer='%s' prompt='%s'", self.chat_id, regex, saned_prompt)
+        return bool(re.search(regex, saned_prompt, re.I))
 
     @property
     def clue(self):
-        t = sum(map(lambda x: len(x), self.answer.split(' ')))
-
-        if self.reply_count == 0:
-            return self._clue
-
-        rendered = list(self._clue)
-        clues = math.floor((float(t)/(self.reply_max+1)) * self.reply_count)
-        while clues > 0:
-            i = self.random.randint(0, t-1)
-            rendered[i] = self.answer[i]
-            clues -= 1
-        self._clue = ''.join(rendered)
-        return self._clue
+        return ' '.join(list(self._clue))
 
 
 def new_game_state(chat_id):
+    logging.info("[%s] new_game_state: Fetching a new answer from opentdb", chat_id)
     question = requests.get('https://opentdb.com/api.php?amount=1&difficulty=easy').json()['results'][0]
 
+    logging.info("[%s] new_game_state: got question. question='%s'", chat_id, question)
     state = GameState(
         in_game=True,
         question_type=question['type'],
@@ -84,8 +90,6 @@ def new_game_state(chat_id):
         answer=question['correct_answer']
     )
 
-    logging.info("question: {}\nanswer: {}\n".format(state.question, state.answer))
-
     return state
 
 
@@ -93,13 +97,13 @@ def quiz(context):
     job = context.job
     state = job.context
 
-    logging.info("[%s] reply_count=%s question='%s' answer='%s'", state.chat_id, state.reply_count, state.question, state.answer)
+    logging.info("[%s] quiz: state=%s", state.chat_id, repr(state))
 
     if not state.in_game:
         return
 
     msg = textwrap.dedent("""
-        ❓: {0}
+        ❓ {0}
 
         {1}
     """).format(state.question, state.clue)
@@ -120,6 +124,8 @@ def quiz(context):
 def failed(context):
     job = context.job
     state = job.context
+
+    logging.info("[%s] failed: state=%s", state.chat_id, repr(state))
 
     if not state.in_game:
         return
@@ -143,8 +149,14 @@ def failed(context):
 
 def stop(update, context):
     state = context.chat_data.get('game_state')
-    if not state or not state.in_game:
+    if not state:
+        return 
+
+    logging.info("[%s] stop: state=%s", state.chat_id, repr(state))
+
+    if not state.in_game:
         return
+
     state.in_game = False
     context.chat_data['game_state'] = None
 
@@ -156,8 +168,14 @@ def stop(update, context):
 
 def next_question(update, context):
     state = context.chat_data.get('game_state')
-    if not state or not state.in_game:
+    if not state:
         return
+    
+    logging.info("[%s] next_question: state=%s", state.chat_id, repr(state))
+    
+    if not state.in_game:
+        return
+
     state.in_game = False
     context.chat_data['game_state'] = None
 
@@ -176,9 +194,12 @@ def start_new(update, context):
 
     state = context.chat_data.get('game_state')
 
+    logging.info("[%s] start: state=%s", chat_id, repr(state))
+
     if state and state.in_game:
         update.message.reply_markdown("Already in a game")
         return
+
 
     try:
         update.message.reply_text("Let's start!")
@@ -188,6 +209,7 @@ def start_new(update, context):
         context.chat_data['game_state'] = state
 
         context.job_queue.run_once(quiz, 1, context=state)
+        logging.info("[%s] start: state=%s", state.chat_id, repr(state))
     except Unauthorized:
         state.in_game = False
 
@@ -199,6 +221,7 @@ def answer(update, context):
     if not state:
         return
 
+    logging.info("[%s] answer: state=%s", state.chat_id, repr(state))
     prompted_answer = update.message.text.lower()
 
     if not state.in_game:
@@ -206,7 +229,7 @@ def answer(update, context):
 
     valid = state.valid_answer(prompted_answer)
 
-    logging.info("[%s] reply_count=%s question='%s' answer='%s' prompt='%s' valid='%s'", state.chat_id, state.reply_count, state.question, state.answer, prompted_answer, valid)
+    logging.info("[%s] answer: state=%s answer='%s' valid=%s", state.chat_id, repr(state), prompted_answer, valid)
 
     if not valid:
         return
@@ -268,6 +291,7 @@ def main():
     # log all errors
     dp.add_error_handler(error)
 
+    logging.info("Booted & Waiting")
     # Start the Bot
     updater.start_polling()
     updater.idle()
