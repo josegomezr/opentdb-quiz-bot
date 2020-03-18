@@ -105,14 +105,16 @@ def quiz(context):
     """).format(state.question, state.clue)
     state.tick()
 
-    context.bot.send_message(state.chat_id, text=msg, parse_mode='HTML')
+    try:
+        context.bot.send_message(state.chat_id, text=msg, parse_mode='HTML')
 
-    delay = state.reply_count * 8
-    callback = quiz
-    if state.reply_count >= state.reply_max:
-        callback = failed
-
-    context.job_queue.run_once(callback, delay, context=state)
+        delay = state.reply_count * 8
+        callback = quiz
+        if state.reply_count >= state.reply_max:
+            callback = failed
+        context.job_queue.run_once(callback, delay, context=state)
+    except Unauthorized:
+        state.in_game = False
 
 
 def failed(context):
@@ -129,11 +131,14 @@ def failed(context):
         Answer: *{1}*
     """).format(state.question, state.answer)
 
-    context.bot.send_message(state.chat_id, text=msg, parse_mode='MARKDOWN')
+    try:
+        context.bot.send_message(state.chat_id, text=msg, parse_mode='MARKDOWN')
 
-    state = new_game_state(state.chat_id)
-    context.dispatcher.chat_data[state.chat_id]['game_state'] = state
-    context.job_queue.run_once(quiz, 1, context=state)
+        state = new_game_state(state.chat_id)
+        context.dispatcher.chat_data[state.chat_id]['game_state'] = state
+        context.job_queue.run_once(quiz, 1, context=state)
+    except Unauthorized:
+        state.in_game = False
 
 
 def stop(update, context):
@@ -143,7 +148,10 @@ def stop(update, context):
     state.in_game = False
     context.chat_data['game_state'] = None
 
-    context.bot.send_message(state.chat_id, text='🛑 Stopped', parse_mode='MARKDOWN')
+    try:
+        context.bot.send_message(state.chat_id, text='🛑 Stopped', parse_mode='MARKDOWN')
+    except Unauthorized:
+        pass
 
 
 def next_question(update, context):
@@ -153,14 +161,17 @@ def next_question(update, context):
     state.in_game = False
     context.chat_data['game_state'] = None
 
-    context.bot.send_message(state.chat_id, text='Next Question!!!', parse_mode='MARKDOWN')
+    try:
+        context.bot.send_message(state.chat_id, text='Next Question!!!', parse_mode='MARKDOWN')
 
-    state = new_game_state(state.chat_id)
-    context.chat_data['game_state'] = state
-    context.job_queue.run_once(quiz, 1, context=state)
+        state = new_game_state(state.chat_id)
+        context.chat_data['game_state'] = state
+        context.job_queue.run_once(quiz, 1, context=state)
+    except Unauthorized:
+        state.in_game = False
 
 
-def start(update, context):
+def start_new(update, context):
     chat_id = update.message.chat_id
 
     state = context.chat_data.get('game_state')
@@ -169,13 +180,16 @@ def start(update, context):
         update.message.reply_markdown("Already in a game")
         return
 
-    update.message.reply_text("Let's start!")
-    logging.info("(Fetching question from api)")
+    try:
+        update.message.reply_text("Let's start!")
+        logging.info("(Fetching question from api)")
 
-    state = new_game_state(chat_id)
-    context.chat_data['game_state'] = state
+        state = new_game_state(chat_id)
+        context.chat_data['game_state'] = state
 
-    context.job_queue.run_once(quiz, 1, context=state)
+        context.job_queue.run_once(quiz, 1, context=state)
+    except Unauthorized:
+        state.in_game = False
 
 
 def answer(update, context):
@@ -207,16 +221,34 @@ def answer(update, context):
         ✅ *{1}* nailed it! The answer is *{0}*
     """).format(answer, update.message.from_user.first_name)
 
-    update.message.reply_markdown(msg, quote=True)
+    try:
+        update.message.reply_markdown(msg, quote=True)
 
-    state = new_game_state(chat_id)
-    context.chat_data['game_state'] = state
-    context.job_queue.run_once(quiz, 1, context=state)
+        state = new_game_state(chat_id)
+        context.chat_data['game_state'] = state
+        context.job_queue.run_once(quiz, 1, context=state)
+    except Unauthorized:
+        state.in_game = False
 
 
 def error(update, context):
     """Log Errors caused by Updates."""
     logging.warning('Update "%s" caused error "%s"', update, context.error)
+
+def start(update, context):
+    """Log Errors caused by Updates."""
+    try:
+        update.message.reply_text(
+            textwrap.dedent("""
+                /start - ashura
+                /new   - empezar
+                /stop  - terminar
+                /next  - OTRA!
+                """
+            )
+        )
+    except Unauthorized:
+        pass
 
 
 def main():
@@ -228,8 +260,9 @@ def main():
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
     dp.add_handler(CommandHandler("next", next_question))
-    dp.add_handler(CommandHandler("new", start))
+    dp.add_handler(CommandHandler("new", start_new))
     dp.add_handler(CommandHandler("stop", stop))
+    dp.add_handler(CommandHandler("start", start))
     dp.add_handler(MessageHandler(filters.Filters.text, answer))
 
     # log all errors
