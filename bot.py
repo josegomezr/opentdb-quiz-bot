@@ -217,11 +217,15 @@ def start_new(update, context):
 def answer(update, context):
     chat_id = update.message.chat_id
     state = context.chat_data.get('game_state')
+    user = update.message.from_user
 
     if not state:
         return
 
-    logging.info("[%s] answer: state=%s", state.chat_id, repr(state))
+    if user.is_bot:
+        return
+
+    logging.info("[%s] answer: state=%s user=%s", state.chat_id, repr(state), [user.id, user.name])
     prompted_answer = update.message.text.lower()
 
     if not state.in_game:
