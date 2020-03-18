@@ -15,7 +15,7 @@ A telegram quiz bot fed with opentdb.com data.
 # if using pipenv
 pipenv install
 pipenv shell
-python bot.py
+QB_BOT_TOKEN="YOUR TELEGRAM BOT TOKEN" python bot.py
 
 # ============
 
